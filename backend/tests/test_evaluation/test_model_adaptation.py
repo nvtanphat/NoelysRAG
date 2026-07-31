@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 
-from evaluation.adaptation.calibration import CalibrationPoint, ThresholdCalibrator
-from evaluation.adaptation.dataset_builder import ModelAdaptationDatasetBuilder
-from evaluation.adaptation.hard_negative_mining import HardNegativeMiner, TextDocument
+from evaluation.harness.adaptation.calibration import CalibrationPoint, ThresholdCalibrator
+from evaluation.harness.adaptation.dataset_builder import ModelAdaptationDatasetBuilder
+from evaluation.harness.adaptation.hard_negative_mining import HardNegativeMiner, TextDocument
 
 
 def test_hard_negative_miner_prefers_lexically_related_non_positive() -> None:

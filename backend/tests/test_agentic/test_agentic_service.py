@@ -7,6 +7,7 @@ from src.agentic.planner import AgenticPlanner
 from src.agentic.service import AgenticRagService
 from src.guardrails.claim_verifier import ClaimVerificationResult, ClaimVerdict
 from src.inference.intent_classifier import QueryIntent
+from src.inference.quality_finalizer import QualityFinalizeResult
 from src.processing.types import EvidenceBlock
 from src.rag.query_router import QueryRouter, RouteType
 from src.rag.types import RetrievalScope, RetrievedChunk
@@ -177,6 +178,15 @@ class FakeEngine:
 
     def _pack_context_chunks(self, chunks):
         return chunks
+
+    async def _graph_probe(self, *, query: str, chunks, scope: RetrievalScope, route_decision=None, enabled: bool = True):
+        return chunks
+
+    async def _finalize_quality(
+        self, *, answer: str, citations: list, confidence: float, evidence_bundle, context_chunks: list,
+        route_decision=None, trace=None, run_slec: bool = True, multimodal: bool = False,
+    ) -> QualityFinalizeResult:
+        return QualityFinalizeResult(answer=answer, citations=citations)
 
     def _build_prompt(self, *, query: str, chunks, answer_language: str, memory_context: str = "", route_type=RouteType.GENERAL, plan_type: str | None = None):
         return f"{query}\n{len(chunks)} chunks\n{memory_context}"

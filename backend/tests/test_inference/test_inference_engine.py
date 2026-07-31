@@ -22,8 +22,8 @@ class FakeRetriever:
     def __init__(self) -> None:
         self.calls: list[dict] = []
 
-    async def retrieve(self, *, query: str, scope: RetrievalScope, limit: int | None = None, preferred_modality: str | None = None):
-        self.calls.append({"query": query, "limit": limit, "preferred_modality": preferred_modality})
+    async def retrieve(self, *, query: str, scope: RetrievalScope, limit: int | None = None, preferred_modality: str | None = None, sparse_enabled: bool = True):
+        self.calls.append({"query": query, "limit": limit, "preferred_modality": preferred_modality, "sparse_enabled": sparse_enabled})
         return [
             RetrievedChunk(
                 chunk_id="chunk-1",

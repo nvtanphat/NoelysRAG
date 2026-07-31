@@ -15,6 +15,30 @@ jobs:
     name: Backend (pytest)
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # FastAPI's lifespan (backend/src/main.py) unconditionally calls init_database()
+    # and _ensure_qdrant_collection() on startup — even under settings.testing — so
+    # any test that spins up TestClient(app) needs a live Mongo + Qdrant, same as
+    # docker-compose.yml. Redis is included too for parity with Celery/rate-limit code.
+    services:
+      mongodb:
+        image: mongo:7.0
+        ports: ["27017:27017"]
+        options: >-
+          --health-cmd "mongosh --eval 'db.adminCommand(\"ping\")'"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.4
+        ports: ["6333:6333"]
+      redis:
+        image: redis:7.4-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s --health-timeout 5s --health-retries 5
+    env:
+      MONGODB_URI: mongodb://localhost:27017/agentbook_test
+      AGENTBOOK_QDRANT_URL: http://localhost:6333
+      AGENTBOOK_REDIS_URL: redis://localhost:6379/0
     steps:
       - uses: actions/checkout@v4
 
@@ -39,7 +63,9 @@ jobs:
 
       - name: Run pytest
         working-directory: backend
-        run: pytest -q
+        # test_tools/ exercises backend/tools/, a local-only debug CLI that isn't
+        # committed to the repo (see git log) — exclude it until that lands.
+        run: pytest -q --ignore=tests/test_tools
 
   frontend:
     name: Frontend (build + test)

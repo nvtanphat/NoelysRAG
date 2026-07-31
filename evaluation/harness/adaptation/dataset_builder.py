@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
-from evaluation.adaptation.hard_negative_mining import HardNegativeMiner, TextDocument
+from evaluation.harness.adaptation.hard_negative_mining import HardNegativeMiner, TextDocument
 
 
 @dataclass(frozen=True)
