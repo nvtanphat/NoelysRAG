@@ -83,7 +83,7 @@ It is natively optimized for **Vietnamese and Bilingual (Vietnamese & English) Q
    - **Bilingual & Cross-Lingual Search**: Handles cross-lingual queries (e.g., asking in Vietnamese about English documents or vice-versa) using `BGE-M3` multilingual alignment, query translation caching, and matching.
 
 4. **Deterministic Table Reasoning**:
-   - Automatically routing math and aggregation table questions to a **deterministic computation executor** instead of the LLM generator, eliminating mathematical hallucinations and arithmetic errors.
+   - Automatically routing math and aggregation table questions to a **deterministic computation executor** (`backend/src/processing/table_executor.py`, invoked from `inference_engine.py`) instead of the LLM generator, eliminating mathematical hallucinations and arithmetic errors.
 
 5. **Post-Generation Verification**:
    - **Sentence-Level Evidence Coverage (SLEC)**: Splits answers into individual assertions and verifies them against the retrieved evidence using Natural Language Inference (NLI) scores.
@@ -123,16 +123,29 @@ flowchart TD
 
     subgraph QueryFlow ["3. Query Pipeline (Real-time)"]
         Router["Intent & Modality Router"] --> QP["Translation, Multi-query, HyDE"]
-        QP --> Retrieval{"Hybrid Retrieval"}
+        QP --> Complexity{"Multi-hop / complex query?"}
+
+        Complexity -->|"no (fast path)"| Retrieval{"Hybrid Retrieval"}
         Retrieval --> DenseSparse["Dense + Sparse Search"]
         Retrieval -.->|"if route needs graph"| GraphRet["Graph Relation Search"]
         DenseSparse --> Rerank["Cross-Encoder Reranker & MMR"]
         GraphRet --> Rerank
         Retrieval -.->|"if modality allows"| VisualRet["Visual Image Search (sequential, skips reranker)"]
+
+        Complexity -->|"yes"| Plan
+        subgraph Agentic ["Bounded Agentic Loop (backend/src/agentic/, max N iterations)"]
+            direction TB
+            Plan["PlannerAgent: decompose sub-questions"] --> Direct["RetrieverDirectorAgent: routes text / graph / visual tools"]
+            Direct --> Crag["CRAGCriticAgent: triage evidence"]
+            Crag -->|"needs more evidence"| Plan
+            Crag -->|"sufficient"| AgFuse["Fuse evidence bundle"] --> Synth["SynthesizerAgent: draft answer (= generation)"]
+        end
+
         Rerank --> Fuse["Evidence Bundle & Context Packing"]
         VisualRet --> Fuse
         Fuse --> Gen["LLM / VLM Generation"]
         Gen --> Verify["SLEC & Citation Aligner & Quality Gate"]
+        Synth --> Verify
     end
 
     API --> Ingestion
@@ -145,40 +158,53 @@ flowchart TD
 
 | Layer | Primary Files / Directory | Core Responsibility |
 | :--- | :--- | :--- |
-| **API** | [materials.py](backend/src/api/v1/endpoints/materials.py), [query.py](backend/src/api/v1/endpoints/query.py) | Exposes REST endpoints, validates scopes, and manages rate limiting. |
-| **Services** | `query_service.py`, `material_service.py` | Core orchestration and business logic interfaces. |
-| **Processing** | `backend/src/processing/` | Document conversions, EasyOCR/VLM layout analysis, entity extraction. |
+| **API** | `backend/src/api/v1/endpoints/` — [materials.py](backend/src/api/v1/endpoints/materials.py), [query.py](backend/src/api/v1/endpoints/query.py), `auth.py`, `collections.py`, `evidence.py`, `graph.py`, `admin.py`, `evaluation.py` | Exposes REST endpoints, validates scopes, and manages rate limiting. |
+| **Services** | `backend/src/services/` — `query_service.py`, `material_service.py`, `auth_service.py`, `admin_service.py`, `memory_service.py`, `parse_index_pipeline.py` | Core orchestration and business logic interfaces. |
+| **Processing** | `backend/src/processing/` | Document conversions, EasyOCR/VLM layout analysis, entity extraction, and the deterministic `table_executor.py`. |
 | **RAG Retrieval** | `backend/src/rag/` | Employs dense+sparse vectors, knowledge graph relation search, and cross-encoders. |
 | **Agentic Planning** | `backend/src/agentic/` | Bounded agentic planner, multi-agent director, and retrieval tool coordinator. |
 | **Inference** | `backend/src/inference/` | Intent routing, LLM/VLM prompting, and deterministic table calculation engine. |
 | **Guardrails** | `backend/src/guardrails/` | SLEC verification, citation alignment checks, and quality-controlled refusals. |
+| **Core / Models / Schemas** | `backend/src/core/` (config, LLM/VLM clients, security), `backend/src/models/` (Beanie ODM documents), `backend/src/schemas/` (Pydantic request/response) | Cross-cutting settings, persistence models, and API contracts. |
+| **Tasks** | `backend/src/tasks/celery_tasks.py` | Celery worker entrypoint for async ingestion. |
 
 ---
 
 ## 📁 Project Directory Structure
 
 ```text
-├── backend/                  # FastAPI Backend Source Code
+├── backend/                    # FastAPI Backend Source Code
 │   ├── src/
-│   │   ├── api/              # REST API Endpoints (v1 endpoints)
-│   │   ├── agentic/          # Bounded Multi-Agent Planning & Orchestration
-│   │   ├── processing/       # Document Parsing (Docling, Whisper, EasyOCR, Normalizers)
-│   │   ├── rag/              # Hybrid Retrieval (Qdrant, MongoDB KG, Reranking, MMR)
-│   │   ├── inference/        # LLM/VLM Inference & Deterministic Table Execution
-│   │   └── guardrails/       # Post-generation Verification (SLEC, Citation Aligner)
-│   ├── tests/                # Unit & integration testing suites
+│   │   ├── main.py             # FastAPI app + lifespan (DB/Qdrant startup)
+│   │   ├── api/                # REST API Endpoints (v1 endpoints)
+│   │   ├── agentic/            # Bounded Multi-Agent Planning & Orchestration
+│   │   ├── processing/         # Document Parsing (Docling, Whisper, EasyOCR, Table Executor)
+│   │   ├── rag/                # Hybrid Retrieval (Qdrant, MongoDB KG, Reranking, MMR)
+│   │   ├── inference/          # LLM/VLM Inference & Deterministic Table Execution
+│   │   ├── guardrails/         # Post-generation Verification (SLEC, Citation Aligner)
+│   │   ├── services/           # Business logic orchestration (query, materials, auth, admin)
+│   │   ├── core/                # Settings, LLM/VLM clients, security, rate limiting
+│   │   ├── models/              # Beanie ODM documents (MongoDB)
+│   │   ├── schemas/             # Pydantic request/response contracts
+│   │   └── tasks/                # Celery worker entrypoint
+│   ├── tests/                  # Unit & integration testing suites
 │   ├── Dockerfile
-│   └── requirements.txt      # Python dependencies
-├── frontend/                 # React + TypeScript + Vite Frontend UI
+│   ├── requirements.txt        # Python dependencies
+│   └── requirements-dev.txt    # Test-only dependencies (pytest, testcontainers, ...)
+├── frontend/                    # React + TypeScript + Vite Frontend UI
 │   ├── src/
-│   │   ├── components/       # Chat window, Citation source cards, GraphCanvas visualizers
-│   │   └── pages/            # Workspace dashboard, Collection views, Authentication
+│   │   ├── components/         # Chat window, Citation source cards, GraphCanvas visualizers
+│   │   ├── pages/                # Workspace dashboard, Collection views, Authentication
+│   │   ├── api/                   # Backend API client
+│   │   └── state/                  # Client-side state management
 │   ├── Dockerfile
 │   └── package.json
-├── config/                   # System Configuration files (.yaml)
-├── docs/                     # Design Documents & Architectural Diagrams
-├── evaluation/               # Gold benchmark evaluation dataset & Ablation scripts
-└── docker-compose.yml        # Docker Multi-service container definitions
+├── config/                     # System Configuration files (.yaml)
+├── docs/                        # Design Documents & Architectural Diagrams
+├── evaluation/                   # Gold benchmark evaluation dataset & Ablation scripts
+├── .github/workflows/           # CI (backend pytest + frontend build/test)
+├── LICENSE                       # MIT License
+└── docker-compose.yml           # Docker Multi-service container definitions
 ```
 
 ---
@@ -324,6 +350,9 @@ The files under the [/config](config/) directory control the system's behavior:
 - **[guardrails_config.yaml](config/guardrails_config.yaml)**: Controls verification thresholds like SLEC limits (`refuse_below` percentage), and allows/disallows file formats and file upload sizes.
 - **[model_config.yaml](config/model_config.yaml)**: Manages routing settings for LLMs and VLMs (temperature, max output tokens, local Ollama URLs).
 - **[extraction_config.yaml](config/extraction_config.yaml)**: Manages how structures, entities, and events are processed during Knowledge Graph generation.
+- **[viz_config.yaml](config/viz_config.yaml)**: Structure-adaptive visualization thresholds consumed by the structure detector.
+- **[logging_config.yaml](config/logging_config.yaml)**: Application logging setup.
+- **[model_adaptation_config.yaml](config/model_adaptation_config.yaml)**: Calibration/dataset-building settings for the offline model-adaptation harness ([evaluation/harness/adaptation/](evaluation/harness/adaptation/)).
 
 ---
 
@@ -335,14 +364,14 @@ Once the backend is up and running, you can access the interactive Swagger API d
 ### Quick API Examples
 
 #### 1. Ingest a Document
+`metadata` is a JSON string (validated as `MaterialUploadMetadata`), not separate form fields:
 ```bash
 curl -X 'POST' \
   'http://localhost:8000/api/v1/materials/upload' \
   -H 'accept: application/json' \
   -H 'Content-Type: multipart/form-data' \
   -F 'file=@/path/to/document.pdf;type=application/pdf' \
-  -F 'collection_id=research_papers' \
-  -F 'owner_id=admin'
+  -F 'metadata={"owner_id":"admin","collection_id":"research_papers"}'
 ```
 
 #### 2. Submit a Query
@@ -393,7 +422,7 @@ A ladder ablation study reveals the impact of each modular component:
 
 ## 📜 License & Academic Citation
 
-The source code and prototype configurations of this system are released for academic and research purposes.
+The source code is released under the [MIT License](LICENSE).
 
 For further scientific details and architecture discussions, please refer to the thesis report [BaoCaoDoAn.pdf](BaoCaoDoAn.pdf) or the research paper [paper.pdf](paper.pdf).
 
