@@ -111,7 +111,8 @@ flowchart TD
         Parse --> EvMap["Evidence Map & Dedup"]
         EvMap --> Chunking["Layout / Semantic / Audio / Slide Chunker"]
         Chunking --> KGExtract["KG Extraction & Linking"]
-        KGExtract --> Embed["BGE-M3 Dense+Sparse & SigLIP Visual Embed"]
+        KGExtract --> Embed["BGE-M3 Dense+Sparse Embed & Index"]
+        Embed -.->|"if figures present"| VisualEmbed["SigLIP Visual Embed (optional, runs after)"]
     end
 
     subgraph Storage ["2. Storage Layer"]
@@ -124,13 +125,13 @@ flowchart TD
         Router["Intent & Modality Router"] --> QP["Translation, Multi-query, HyDE"]
         QP --> Retrieval{"Hybrid Retrieval"}
         Retrieval --> DenseSparse["Dense + Sparse Search"]
-        Retrieval --> GraphRet["Graph Relation Search"]
-        Retrieval --> VisualRet["Visual Image Search"]
+        Retrieval -.->|"if route needs graph"| GraphRet["Graph Relation Search"]
         DenseSparse --> Rerank["Cross-Encoder Reranker & MMR"]
         GraphRet --> Rerank
-        VisualRet --> Rerank
-        Rerank --> Ctx["Evidence Bundle & Context Packing"]
-        Ctx --> Gen["LLM / VLM Generation"]
+        Retrieval -.->|"if modality allows"| VisualRet["Visual Image Search (sequential, skips reranker)"]
+        Rerank --> Fuse["Evidence Bundle & Context Packing"]
+        VisualRet --> Fuse
+        Fuse --> Gen["LLM / VLM Generation"]
         Gen --> Verify["SLEC & Citation Aligner & Quality Gate"]
     end
 

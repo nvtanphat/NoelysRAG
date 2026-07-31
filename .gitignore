@@ -89,3 +89,6 @@ evaluation/cli/rescore_ablation.py
 # Ignore all LaTeX files
 *.tex
 
+# Ignore thesis report and paper PDFs at the root
+/BaoCaoDoAn.pdf
+/paper.pdf
