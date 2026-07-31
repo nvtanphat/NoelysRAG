@@ -36,6 +36,7 @@
   - [Prerequisites](#prerequisites)
   - [Option A: Docker Compose Deployment (Recommended)](#option-a-docker-compose-deployment-recommended)
   - [Option B: Manual Local Setup (Development)](#option-b-manual-local-setup-development)
+- [✅ Running Tests](#-running-tests)
 - [⚙️ Configuration Guide](#️-configuration-guide)
 - [📡 API Documentation](#-api-documentation)
 - [📈 Experimental Evaluation](#-experimental-evaluation)
@@ -187,11 +188,11 @@ flowchart TD
 
 - **Docker** & **Docker Compose**
 - **Node.js** (v18+) & **npm** (if running the frontend natively)
-- **Python** (3.10+) (if running the backend natively)
+- **Python 3.12** (if running the backend natively — matches `backend/Dockerfile`)
 - **Ollama** running locally or accessible via network. Pre-download the models:
   ```bash
   ollama pull qwen2.5:7b
-  ollama pull qwen2.5-vl:3b
+  ollama pull qwen2.5vl:3b
   ```
 
 ---
@@ -262,6 +263,10 @@ Navigate to the `backend` directory, create a virtual environment, and install d
 cd backend
 python -m venv venv
 source venv/bin/activate  # On Windows use: venv\Scripts\activate
+
+# PyTorch is installed separately from the CPU wheel index (see backend/Dockerfile);
+# requirements.txt intentionally does not pin it so GPU hosts can swap the index URL.
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
 pip install -r requirements.txt
 ```
 Copy `.env.example` to `.env` and adjust the variables (MongoDB URI, Qdrant URI, Redis URI, Ollama Host, etc.) to match your local setup:
@@ -285,6 +290,27 @@ Navigate to the `frontend` directory, install Node packages, and run the Vite de
 cd frontend
 npm install
 npm run dev
+```
+
+---
+
+## ✅ Running Tests
+
+CI runs both suites on every push/PR (see [.github/workflows/ci.yml](.github/workflows/ci.yml)).
+
+**Backend** (from `backend/`, inside the virtualenv from [Option B](#option-b-manual-local-setup-development)):
+```bash
+pip install -r requirements-dev.txt   # adds pytest, pytest-asyncio, pandas, testcontainers
+pytest -q --ignore=tests/test_tools   # test_tools/ exercises a local-only debug CLI not tracked in git
+```
+Docker-backed integration tests (`tests/integration/`) are skipped by default; opt in with:
+```bash
+AGENTBOOK_RUN_INTEGRATION=true pytest -q tests/integration
+```
+
+**Frontend** (from `frontend/`):
+```bash
+npm test
 ```
 
 ---
