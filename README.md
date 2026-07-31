@@ -19,6 +19,10 @@
   <a href="https://ollama.com/"><img src="https://img.shields.io/badge/Ollama-black?style=flat-square&logo=ollama&logoColor=white" alt="Ollama"/></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/nvtanphat/NoelysRAG/actions/workflows/ci.yml"><img src="https://github.com/nvtanphat/NoelysRAG/actions/workflows/ci.yml/badge.svg" alt="CI"/></a>
+</p>
+
 ---
 
 ## 📋 Table of Contents
@@ -139,7 +143,7 @@ flowchart TD
 
 | Layer | Primary Files / Directory | Core Responsibility |
 | :--- | :--- | :--- |
-| **API** | [materials.py](file:///d:/GenAI/TanPhatRag/backend/src/api/v1/endpoints/materials.py), [query.py](file:///d:/GenAI/TanPhatRag/backend/src/api/v1/endpoints/query.py) | Exposes REST endpoints, validates scopes, and manages rate limiting. |
+| **API** | [materials.py](backend/src/api/v1/endpoints/materials.py), [query.py](backend/src/api/v1/endpoints/query.py) | Exposes REST endpoints, validates scopes, and manages rate limiting. |
 | **Services** | `query_service.py`, `material_service.py` | Core orchestration and business logic interfaces. |
 | **Processing** | `backend/src/processing/` | Document conversions, EasyOCR/VLM layout analysis, entity extraction. |
 | **RAG Retrieval** | `backend/src/rag/` | Employs dense+sparse vectors, knowledge graph relation search, and cross-encoders. |
@@ -287,12 +291,12 @@ npm run dev
 
 ## ⚙️ Configuration Guide
 
-The files under the [/config](file:///d:/GenAI/TanPhatRag/config) directory control the system's behavior:
+The files under the [/config](config/) directory control the system's behavior:
 
-- **[retrieval_config.yaml](file:///d:/GenAI/TanPhatRag/config/retrieval_config.yaml)**: Configures parameters like `dense_top_k`, `sparse_top_k`, reranking weights, RRF constant (`rrf_k`), and graph search parameters (e.g. `graph_max_hops`).
-- **[guardrails_config.yaml](file:///d:/GenAI/TanPhatRag/config/guardrails_config.yaml)**: Controls verification thresholds like SLEC limits (`refuse_below` percentage), and allows/disallows file formats and file upload sizes.
-- **[model_config.yaml](file:///d:/GenAI/TanPhatRag/config/model_config.yaml)**: Manages routing settings for LLMs and VLMs (temperature, max output tokens, local Ollama URLs).
-- **[extraction_config.yaml](file:///d:/GenAI/TanPhatRag/config/extraction_config.yaml)**: Manages how structures, entities, and events are processed during Knowledge Graph generation.
+- **[retrieval_config.yaml](config/retrieval_config.yaml)**: Configures parameters like `dense_top_k`, `sparse_top_k`, reranking weights, RRF constant (`rrf_k`), and graph search parameters (e.g. `graph_max_hops`).
+- **[guardrails_config.yaml](config/guardrails_config.yaml)**: Controls verification thresholds like SLEC limits (`refuse_below` percentage), and allows/disallows file formats and file upload sizes.
+- **[model_config.yaml](config/model_config.yaml)**: Manages routing settings for LLMs and VLMs (temperature, max output tokens, local Ollama URLs).
+- **[extraction_config.yaml](config/extraction_config.yaml)**: Manages how structures, entities, and events are processed during Knowledge Graph generation.
 
 ---
 
