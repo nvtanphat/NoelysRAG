@@ -4,6 +4,7 @@ import re
 from uuid import NAMESPACE_URL, uuid5
 
 from src.models.material import BoundingBox, MaterialBlock, MaterialPage
+from src.processing.column_segmenter import annotate_columns
 from src.processing.language_detector import detect_block_language, detect_document_language
 from src.processing.reading_order import order_blocks_by_reading
 from src.processing.types import BBox, BlockType, ParsedBlock, ParsedDocument, ParsedPage
@@ -13,6 +14,17 @@ _TEXT_FRAGMENT_TYPES = {BlockType.PARAGRAPH.value, BlockType.LIST.value}
 
 
 class LayoutNormalizer:
+    def __init__(
+        self,
+        *,
+        column_detection_enabled: bool = True,
+        column_min_gutter_ratio: float = 0.04,
+        column_min_band_occupancy_ratio: float = 0.30,
+    ) -> None:
+        self.column_detection_enabled = column_detection_enabled
+        self.column_min_gutter_ratio = column_min_gutter_ratio
+        self.column_min_band_occupancy_ratio = column_min_band_occupancy_ratio
+
     def normalize(self, parsed: ParsedDocument) -> ParsedDocument:
         normalized_pages: list[ParsedPage] = []
         declared_lang = parsed.language if parsed.language not in ("unknown", "") else None
@@ -31,6 +43,16 @@ class LayoutNormalizer:
             # keeps the parser's reading_order (which handles columns) unless the
             # page is grossly reversed, in which case it falls back to geometry.
             blocks = order_blocks_by_reading(blocks)
+            # Column/panel-aware annotation for OCR images: detect column bands and
+            # stamp column_index (order preserved) so the line merger below never
+            # merges across a column/panel boundary. No-op (single column) for
+            # normal pages; keeps genuine table rows together (row-major).
+            if self.column_detection_enabled:
+                blocks = annotate_columns(
+                    blocks,
+                    min_gutter_ratio=self.column_min_gutter_ratio,
+                    min_band_occupancy_ratio=self.column_min_band_occupancy_ratio,
+                )
             blocks = self._merge_ocr_lines(blocks)
             blocks = self._merge_text_fragments(blocks)
             normalized_blocks = [
@@ -105,6 +127,9 @@ class LayoutNormalizer:
                 and block.bbox is not None
                 and previous.bbox is not None
                 and (block.bbox.y1 - previous.bbox.y2) <= gap_threshold
+                # Never merge across a detected column/panel boundary. Single-column
+                # pages carry no column_index (None == None) → unchanged behavior.
+                and block.extra.get("column_index") == previous.extra.get("column_index")
             )
             if can_merge:
                 current_group.append(block)

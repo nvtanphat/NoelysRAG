@@ -133,6 +133,12 @@ def verbalize_rows(
     downstream substantive-chunk filter recognises these as table rows.
     """
     width = len(header)
+    if _is_sectioned_keyvalue(rows, width):
+        return _verbalize_sectioned(
+            header, rows, width,
+            table_name=table_name, language=language,
+            start_index=start_index, row_numbers=row_numbers,
+        )
     out: list[tuple[int, str]] = []
     for offset, row in enumerate(rows):
         idx = row_numbers[offset] if row_numbers and offset < len(row_numbers) else start_index + offset
@@ -151,6 +157,76 @@ def verbalize_rows(
             out.append((idx, f"Row {idx} of table '{table_name}'. {body}."))
         else:
             out.append((idx, f"Hàng {idx} của bảng '{table_name}'. {body}."))
+    return out
+
+
+def _is_sectioned_keyvalue(rows: list[list[str]], width: int) -> bool:
+    """Detect a long-format key/value table that uses *section-header rows*.
+
+    Small VLMs flatten a multi-metric chart page into a 2-column table where each
+    metric is a section header (a row with only the first cell filled, the rest
+    blank) followed by ``year | value`` data rows. The generic per-column
+    verbaliser mislabels every such row with the header of column 0 (e.g. tags a
+    profit figure as "Tổng tài sản"). We re-route those tables to a section-aware
+    verbaliser. A normal grid (every data row has >= 2 filled cells) is untouched.
+    """
+    if width < 2:
+        return False
+    section_rows = 0
+    for row in rows:
+        cells = (list(row) + [""] * width)[:width]
+        filled = [i for i, c in enumerate(cells) if (c or "").strip()]
+        if filled == [0]:
+            section_rows += 1
+    return section_rows >= 1
+
+
+def _verbalize_sectioned(
+    header: list[str],
+    rows: list[list[str]],
+    width: int,
+    *,
+    table_name: str,
+    language: str,
+    start_index: int,
+    row_numbers: list[int] | None,
+) -> list[tuple[int, str]]:
+    """Verbalise a sectioned key/value table: ``{section}. {key}: {values}``.
+
+    The current section starts as the column-0 header (the first metric, which the
+    VLM puts in the header rather than a row) and is reset by each section-header
+    row. Data rows are emitted as ``section — key: value(s)`` ignoring the (junk)
+    column headers, so every figure stays tied to its real metric.
+    """
+    section = (header[0] or "").strip() if header else ""
+    out: list[tuple[int, str]] = []
+    emitted = 0
+    for offset, row in enumerate(rows):
+        cells = (list(row) + [""] * width)[:width]
+        filled = [i for i, c in enumerate(cells) if (c or "").strip()]
+        if filled == [0]:
+            section = _clip(cells[0]).strip()
+            continue
+        if not filled:
+            continue
+        idx = (
+            row_numbers[offset]
+            if row_numbers and offset < len(row_numbers)
+            else start_index + emitted
+        )
+        emitted += 1
+        key = _clip(cells[0]).strip()
+        values = [_clip(c).strip() for c in cells[1:] if (c or "").strip()]
+        value_str = ", ".join(values)
+        section_label = section or "—"
+        if value_str:
+            core = f"{section_label}. {key}: {value_str}" if key else f"{section_label}: {value_str}"
+        else:
+            core = f"{section_label}: {key}"
+        if language == "en":
+            out.append((idx, f"Row {idx} of table '{table_name}'. {core}."))
+        else:
+            out.append((idx, f"Hàng {idx} của bảng '{table_name}'. {core}."))
     return out
 
 

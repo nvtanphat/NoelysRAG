@@ -9,6 +9,7 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       AGENTBOOK_QDRANT_URL: http://qdrant:6333
+      AGENTBOOK_QDRANT_TIMEOUT_SECONDS: "300"
       AGENTBOOK_REDIS_URL: redis://redis:6379/0
       # API enqueues ingest tasks → must point Celery at the redis service, not
       # localhost (kombu defaults to localhost:6379 otherwise → upload fails).
@@ -26,6 +27,7 @@ services:
     depends_on:
       qdrant: { condition: service_healthy }
       redis:  { condition: service_healthy }
+      mongodb: { condition: service_healthy }
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
       interval: 30s
@@ -49,6 +51,7 @@ services:
     env_file: [backend/.env]
     environment:
       AGENTBOOK_QDRANT_URL: http://qdrant:6333
+      AGENTBOOK_QDRANT_TIMEOUT_SECONDS: "300"
       AGENTBOOK_REDIS_URL: redis://redis:6379/0
       AGENTBOOK_CELERY_BROKER_URL: redis://redis:6379/0
       AGENTBOOK_CELERY_RESULT_BACKEND: redis://redis:6379/1
@@ -67,6 +70,7 @@ services:
     depends_on:
       qdrant: { condition: service_healthy }
       redis:  { condition: service_healthy }
+      mongodb: { condition: service_healthy }
     healthcheck:
       disable: true
     deploy:
@@ -129,5 +133,24 @@ services:
         limits: { memory: 512M }
     restart: unless-stopped
 
+  mongodb:
+    image: mongo:7.0
+    ports:
+      - "127.0.0.1:27017:27017"
+    volumes:
+      - mongodb-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    deploy:
+      resources:
+        limits: { memory: 1G }
+        reservations: { memory: 512M }
+    restart: unless-stopped
+
 volumes:
   redis-data:
+  mongodb-data:

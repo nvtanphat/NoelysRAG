@@ -136,6 +136,7 @@ class Settings(BaseSettings):
     reranker_model_name: str = "BAAI/bge-reranker-v2-m3"
     reranker_device: str = "cpu"
     reranker_max_pairs: int = 100
+    reranker_max_length: int = 512  # truncate each (query, chunk) pair so long chunks (e.g. big tables) don't blow a predict batch up to minutes
     dense_top_k: int = 20
     sparse_top_k: int = 20
     graph_top_k: int = 10
@@ -193,7 +194,7 @@ class Settings(BaseSettings):
     chunk_target_token_count: int = 512
     chunk_min_token_count: int = 100
     chunk_overlap_token_count: int = 50
-    chunk_max_blocks_per_chunk: int = 8
+    chunk_max_blocks_per_chunk: int = 20
     semantic_chunk_breakpoint_percentile: float = 95.0
     min_ocr_text_quality: float = 0.35
     warn_ocr_text_quality: float = 0.55
@@ -336,10 +337,19 @@ class Settings(BaseSettings):
     ocr_recognition_engine: str = "easyocr"  # easyocr | vietocr (vi-only)
     ocr_vietocr_model_name: str = "vgg_transformer"
     ocr_vietocr_device: str = "cpu"
+    ocr_easyocr_gpu: bool = False
     ocr_garbled_vi_diacritic_ratio: float = 0.03  # re-OCR page when VI diacritics < 3% of alpha chars
     image_ocr_text_word_threshold: int = 20        # standalone image with >= this many OCR words = text scan
     image_numeric_ratio_vlm_trigger: float = 0.30  # text-dense image with >= this numeric-token ratio = chart/table → also run VLM
     image_structure_vlm_max_side_px: int = 2048    # resolution for the chart/table VLM structure pass (dense numbers need detail)
+    image_structure_vlm_min_digit_cell_ratio: float = 0.15  # a body column is "numeric" if >= this fraction of its cells hold a digit; a VLM structure table needs >= 2 numeric columns, else discarded as a hollow grid
+    image_structure_vlm_num_predict: int = 1536  # max output tokens for the chart/table structure pass; dense multi-metric pages need more than the default 512 or the table truncates
+    # Column/panel-aware OCR layout: split multi-panel pages (dashboards, side-by-side
+    # charts) into columns by vertical-whitespace gutters so adjacent panels are not
+    # merged across columns. All thresholds are ratios of page geometry (no hardcoded px).
+    layout_column_detection_enabled: bool = True
+    layout_column_min_gutter_ratio: float = 0.04   # min gutter width as fraction of content width to count as a column separator
+    layout_column_min_band_occupancy_ratio: float = 0.10  # min vertical occupancy for an x-bin to count as "filled" (gutter ~0; column >0)
     # Hybrid table reader (2b): VLM-read numeric-dense figures on pages where
     # Docling's TableFormer found no table. Docling stays the exact source; VLM
     # output is tagged table_source="vlm" + lower confidence so evidence/citation
@@ -656,6 +666,7 @@ def get_settings() -> Settings:
         reranker_model_name=reranker_config.get("model_name", "BAAI/bge-reranker-v2-m3"),
         reranker_device=env_value("RERANKER_DEVICE", reranker_config.get("device", "cpu")),
         reranker_max_pairs=int(reranker_config.get("max_pairs", 80)),
+        reranker_max_length=int(reranker_config.get("max_length", 512)),
         dense_top_k=retrieval_section.get("dense_top_k", 20),
         sparse_top_k=retrieval_section.get("sparse_top_k", 20),
         graph_top_k=retrieval_section.get("graph_top_k", 10),
@@ -702,7 +713,7 @@ def get_settings() -> Settings:
         chunk_target_token_count=chunking_config.get("target_token_count", 512),
         chunk_min_token_count=chunking_config.get("min_token_count", 100),
         chunk_overlap_token_count=chunking_config.get("overlap_token_count", 50),
-        chunk_max_blocks_per_chunk=chunking_config.get("max_blocks_per_chunk", 8),
+        chunk_max_blocks_per_chunk=chunking_config.get("max_blocks_per_chunk", 20),
         semantic_chunk_breakpoint_percentile=float(chunking_config.get("breakpoint_percentile", 95.0)),
         adaptive_retrieval_enabled=env_bool(
             "ADAPTIVE_RETRIEVAL_ENABLED",
@@ -779,10 +790,16 @@ def get_settings() -> Settings:
         ocr_recognition_engine=str(ocr_config.get("recognition_engine", "easyocr")).lower(),
         ocr_vietocr_model_name=str(ocr_config.get("vietocr_model_name", "vgg_transformer")),
         ocr_vietocr_device=env_value("OCR_VIETOCR_DEVICE", ocr_config.get("vietocr_device", "cpu")),
+        ocr_easyocr_gpu=env_bool("OCR_EASYOCR_GPU", bool(ocr_config.get("easyocr_gpu", False))),
         ocr_garbled_vi_diacritic_ratio=float(ocr_config.get("garbled_vi_diacritic_ratio", 0.03)),
         image_ocr_text_word_threshold=int(ocr_config.get("image_ocr_text_word_threshold", 20)),
         image_numeric_ratio_vlm_trigger=float(ocr_config.get("image_numeric_ratio_vlm_trigger", 0.30)),
         image_structure_vlm_max_side_px=int(ocr_config.get("image_structure_vlm_max_side_px", 2048)),
+        image_structure_vlm_min_digit_cell_ratio=float(ocr_config.get("image_structure_vlm_min_digit_cell_ratio", 0.15)),
+        image_structure_vlm_num_predict=int(ocr_config.get("image_structure_vlm_num_predict", 1536)),
+        layout_column_detection_enabled=bool(ocr_config.get("layout_column_detection_enabled", True)),
+        layout_column_min_gutter_ratio=float(ocr_config.get("layout_column_min_gutter_ratio", 0.04)),
+        layout_column_min_band_occupancy_ratio=float(ocr_config.get("layout_column_min_band_occupancy_ratio", 0.30)),
         vlm_table_fallback_enabled=bool(ocr_config.get("vlm_table_fallback_enabled", True)),
         vlm_table_confidence=float(ocr_config.get("vlm_table_confidence", 0.5)),
         pdf_render_scale=float(pdf_config.get("render_scale", 1.5)),

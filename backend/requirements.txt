@@ -23,6 +23,11 @@ easyocr
 # model_config.yaml sets recognition_engine: "vietocr"; without it Vietnamese
 # OCR raises DependencyUnavailableError and the whole ingest fails.
 vietocr>=0.3.13
+# setuptools<81: vietocr -> gdown imports `pkg_resources`, which setuptools 81+
+# removed. An unpinned setuptools pulls 82.x and breaks VietOCR recognition with
+# `ModuleNotFoundError: No module named 'pkg_resources'`, silently degrading
+# Vietnamese OCR to garbage. Keep below 81 until gdown drops pkg_resources.
+setuptools<81
 # Per-sentence / per-block language detection (cross-lingual routing). Falls back
 # to a latin-char heuristic when absent, but is far more accurate installed.
 langdetect>=1.0.9

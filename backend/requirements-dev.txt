@@ -1,0 +1,6 @@
+# Test-only dependencies, not needed by the runtime image (see backend/Dockerfile).
+-r requirements.txt
+pytest==8.3.3
+pytest-asyncio==0.24.0
+pandas>=2.2.0
+testcontainers[mongodb]>=4.8.0

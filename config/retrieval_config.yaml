@@ -169,6 +169,6 @@ chunking:
   target_token_count: 512
   min_token_count: 100
   overlap_token_count: 50
-  max_blocks_per_chunk: 8
+  max_blocks_per_chunk: 20   # raised from 8 → avoid truncating dense multi-panel pages (many small blocks) across chunks
   breakpoint_percentile: 95.0
   min_content_chars: 50

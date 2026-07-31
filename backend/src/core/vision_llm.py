@@ -14,6 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 _OLLAMA_VISION_MODELS = [
+    "qwen2.5-vl",
     "qwen2.5vl",
     "qwen2-vl",
     "minicpm-v",

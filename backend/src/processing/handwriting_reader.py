@@ -41,7 +41,7 @@ _HANDWRITING_PROMPT_EN = (
 )
 
 # Vision models tried in priority order — qwen2.5vl reads dense text + Vietnamese far better.
-_OLLAMA_VISION_MODELS = ["qwen2.5vl", "qwen2-vl", "minicpm-v", "llava", "moondream", "bakllava", "llava-phi3"]
+_OLLAMA_VISION_MODELS = ["qwen2.5-vl", "qwen2.5vl", "qwen2-vl", "minicpm-v", "llava", "moondream", "bakllava", "llava-phi3"]
 
 
 def _remove_repetition(text: str) -> str:
@@ -62,7 +62,7 @@ class HandwritingReader:
     ) -> None:
         self.settings = settings
         self.quality_checker = quality_checker or ImageQualityChecker(settings)
-        self.ocr_engine = ocr_engine or EasyOCREngine(lang="vi")
+        self.ocr_engine = ocr_engine or EasyOCREngine(lang="vi", gpu=settings.ocr_easyocr_gpu)
         self._vlm_model: str | None = None
         self._vlm_model_checked: bool = False
         self._vlm_lock = threading.Lock()

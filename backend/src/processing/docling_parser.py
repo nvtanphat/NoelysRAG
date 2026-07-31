@@ -409,7 +409,7 @@ class DoclingParser:
                 device=settings.ocr_vietocr_device,
                 model_name=settings.ocr_vietocr_model_name,
             )
-        engine = EasyOCREngine(lang=ocr_language, recognizer=recognizer)
+        engine = EasyOCREngine(lang=ocr_language, gpu=settings.ocr_easyocr_gpu, recognizer=recognizer)
         render_scale = settings.pdf_render_scale
 
         pdf = pdfium.PdfDocument(str(file_path))

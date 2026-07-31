@@ -110,6 +110,7 @@ reranker:
   enabled: true
   model_name: "BAAI/bge-reranker-v2-m3"
   device: "cpu"
+  max_length: 512   # truncate each (query, chunk) pair; long chunks (big tables) otherwise make a predict batch take minutes
 
 versions:
   parse_version: "docling-2026-04-mining"
@@ -163,6 +164,24 @@ ocr:
   image_ocr_text_word_threshold: 20
   image_numeric_ratio_vlm_trigger: 0.30
   image_structure_vlm_max_side_px: 2048   # higher res for the chart/table VLM pass (dense numbers)
+  # VLM structure table must carry real numbers across multiple columns: a body
+  # column counts as "numeric" when >= this fraction of its cells hold a digit, and
+  # the table needs >= 2 numeric columns. Multi-panel pages make small VLMs emit a
+  # hollow grid (only the year column filled) — that has 1 numeric column and is
+  # discarded, so the pipeline keeps faithful OCR-only output.
+  image_structure_vlm_min_digit_cell_ratio: 0.15
+  # Max output tokens for the chart/table structure pass. Dense multi-metric pages
+  # (e.g. an 8-chart financial dashboard) overflow the default 512 and truncate the
+  # table mid-way; 1536 fits the full extraction.
+  image_structure_vlm_num_predict: 1536
+  # ── Column/panel-aware OCR layout ──────────────────────────────────────────
+  # Multi-panel pages (dashboards, side-by-side charts) are split into columns by
+  # vertical-whitespace gutters so adjacent panels are not merged across columns and
+  # are read column-major. Thresholds are ratios of page geometry (no hardcoded px);
+  # a normal single-column page detects 1 column and behaves exactly as before.
+  layout_column_detection_enabled: true
+  layout_column_min_gutter_ratio: 0.04
+  layout_column_min_band_occupancy_ratio: 0.10
   # Hybrid table reader (2b): VLM-read numeric-dense figures on pages where Docling
   # found no table. Docling stays the exact/citation source; VLM tables get
   # table_source="vlm" + low confidence so evidence/citation treats them cautiously.
@@ -217,7 +236,7 @@ figure_captioner:
 vlm_query:
   enabled: true                         # use VLM over retrieved visual evidence for figure/image/chart queries
   provider: "auto"                      # auto | ollama | openai_compatible
-  ollama_model: ""                      # empty = auto-detect qwen2.5vl/qwen2-vl/minicpm-v/llava
+  ollama_model: "qwen2.5vl:3b"                      # empty = auto-detect qwen2.5vl/qwen2-vl/minicpm-v/llava
   openai_model: ""                      # empty = reuse llm.openai_model
   max_images: 2                         # max retrieved corpus images passed to VLM
   image_max_side_px: 1024               # resize query/evidence images before VLM call

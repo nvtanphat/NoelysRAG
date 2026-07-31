@@ -4,6 +4,7 @@ import gc
 import json
 import asyncio
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -71,6 +72,54 @@ def _bbox_covers_most_of_page(bbox, page_width: int, page_height: int) -> bool:
     return area_ratio >= _FULL_PAGE_AREA_RATIO
 
 
+def _table_has_numeric_data(caption: str, *, min_digit_cell_ratio: float) -> bool:
+    """True when the VLM caption's markdown table(s) carry real numeric data.
+
+    The VLM structure pass only runs on numeric-dense images, so a "table" whose
+    data columns are empty is a failure (small VLMs collapse multi-panel pages
+    into a hollow grid: only the year/label column is filled, every value column
+    blank). Counting digit cells overall does NOT catch this — the year column is
+    itself numeric. Instead we count *numeric columns*: a body column where at
+    least ``min_digit_cell_ratio`` of its cells contain a digit. A genuine
+    chart/table has >= 2 numeric columns (year + >=1 value series, in either
+    orientation); the hollow bug has exactly one (the year/label column).
+
+    A prose caption (no markdown table parses) is accepted unchanged — only
+    dataless tables are rejected. Multi-section captions (the prompt emits
+    "## region" tables) qualify if ANY section is a real data table.
+    """
+    from src.processing.table_serializer import parse_markdown_table
+
+    sections = re.split(r"(?m)^##\s+.*$", caption or "")
+    if len(sections) <= 1:
+        sections = [caption or ""]
+
+    parsed_any = False
+    for section in sections:
+        parsed = parse_markdown_table(section)
+        if parsed is None:
+            continue
+        parsed_any = True
+        _header, rows = parsed
+        if not rows:
+            continue
+        width = max(len(r) for r in rows)
+        numeric_columns = 0
+        for col in range(width):
+            cells = [r[col] for r in rows if col < len(r)]
+            if not cells:
+                continue
+            digit_cells = sum(1 for c in cells if any(ch.isdigit() for ch in c))
+            if (digit_cells / len(cells)) >= min_digit_cell_ratio:
+                numeric_columns += 1
+        if numeric_columns >= 2:
+            return True
+
+    # No section parsed as a table → prose caption, not the bug → accept.
+    # Otherwise every parsed table was hollow (< 2 numeric columns) → reject.
+    return not parsed_any
+
+
 class ParseIndexPipeline:
     def __init__(
         self,
@@ -98,7 +147,11 @@ class ParseIndexPipeline:
         self.spreadsheet_parser = spreadsheet_parser or SpreadsheetParser()
         self.handwriting_reader = handwriting_reader or HandwritingReader(settings=settings)
         self.audio_parser = AudioParser(settings=settings)
-        self.normalizer = normalizer or LayoutNormalizer()
+        self.normalizer = normalizer or LayoutNormalizer(
+            column_detection_enabled=settings.layout_column_detection_enabled,
+            column_min_gutter_ratio=settings.layout_column_min_gutter_ratio,
+            column_min_band_occupancy_ratio=settings.layout_column_min_band_occupancy_ratio,
+        )
         self.evidence_mapper = evidence_mapper or EvidenceMapper()
         _llm = build_llm(settings)
         self.entity_extractor = entity_extractor or EntityExtractor(
@@ -302,6 +355,12 @@ class ParseIndexPipeline:
                 status=PipelineStatus.INDEXED.value,
                 stage=PipelineStatus.INDEXED.value,
                 finished=True,
+            )
+            # Content changed → drop stale semantic-cache answers for this scope,
+            # else a re-index keeps returning the pre-fix answer for up to the TTL.
+            self._invalidate_semantic_cache(
+                owner_id=str(material.owner_id),
+                collection_id=str(material.collection_id) if material.collection_id else None,
             )
         except MemoryError:
             logger.critical(
@@ -599,6 +658,7 @@ class ParseIndexPipeline:
             num_ctx=self.settings.vlm_caption_num_ctx,
             list_bullet_ratio_max=self.settings.caption_list_bullet_ratio_max,
             list_bullet_max_words=self.settings.caption_list_bullet_max_words,
+            ollama_model=self.settings.vlm_query_ollama_model,
         )
         # Pre-check Ollama availability once before spawning threads, so threads
         # share the cached result and don't each trigger a 5s network probe.
@@ -882,6 +942,7 @@ class ParseIndexPipeline:
             num_ctx=self.settings.vlm_caption_num_ctx,
             list_bullet_ratio_max=self.settings.caption_list_bullet_ratio_max,
             list_bullet_max_words=self.settings.caption_list_bullet_max_words,
+            ollama_model=self.settings.vlm_query_ollama_model,
         )
         vlm_model = captioner._detect_available_model()
         fallback_reason = "vlm_unavailable"
@@ -963,6 +1024,24 @@ class ParseIndexPipeline:
                         numeric += 1
         return (numeric / total) if total else 0.0
 
+    def _invalidate_semantic_cache(self, *, owner_id: str, collection_id: str | None) -> None:
+        """Drop cached query→answer pairs for a scope after its content changes.
+
+        Best-effort: any failure (Redis down, import error) is logged and ignored
+        so it never affects the just-completed index.
+        """
+        try:
+            from src.services.semantic_query_cache import SemanticQueryCache
+
+            cache = SemanticQueryCache(redis_url=self.settings.redis_url)
+            if cache.enabled:
+                cache.invalidate_scope(owner_id=owner_id, collection_id=collection_id)
+        except Exception as exc:
+            logger.warning(
+                "Semantic cache invalidation skipped after re-index",
+                extra={"owner_id": owner_id, "collection_id": collection_id, "error": str(exc)},
+            )
+
     def _vlm_structure_block(self, path: Path, *, language: str) -> "ParsedBlock | None":
         """Caption a chart/table image with a VLM into a structure-preserving block.
 
@@ -976,8 +1055,10 @@ class ParseIndexPipeline:
             timeout=self.settings.ollama_caption_timeout_seconds,
             image_max_side_px=self.settings.image_structure_vlm_max_side_px,
             num_ctx=self.settings.vlm_caption_num_ctx,
+            num_predict=self.settings.image_structure_vlm_num_predict,
             list_bullet_ratio_max=self.settings.caption_list_bullet_ratio_max,
             list_bullet_max_words=self.settings.caption_list_bullet_max_words,
+            ollama_model=self.settings.vlm_query_ollama_model,
         )
         if not captioner._detect_available_model():
             return None
@@ -985,6 +1066,17 @@ class ParseIndexPipeline:
 
         caption = captioner.caption_image_path(path)
         if not caption or len(caption.strip()) < 80 or _looks_like_gibberish(caption):
+            return None
+        # This pass only fires on numeric-dense images; a table the VLM returned
+        # with (near-)empty body cells is a failure (small VLMs collapse on
+        # multi-panel pages). Discard it so the caller keeps faithful OCR-only.
+        if not _table_has_numeric_data(
+            caption, min_digit_cell_ratio=self.settings.image_structure_vlm_min_digit_cell_ratio
+        ):
+            logger.warning(
+                "VLM structure pass produced a dataless table — discarding (keeping OCR-only)",
+                extra={"image": path.name, "preview": caption[:120]},
+            )
             return None
         return ParsedBlock(
             block_id=f"blk-vlm-{path.stem[:12]}",
@@ -1136,7 +1228,7 @@ class ParseIndexPipeline:
                     device=self.settings.ocr_vietocr_device,
                     model_name=self.settings.ocr_vietocr_model_name,
                 )
-            self._ocr_engines[language] = EasyOCREngine(lang=lang, gpu=False, recognizer=recognizer)
+            self._ocr_engines[language] = EasyOCREngine(lang=lang, gpu=self.settings.ocr_easyocr_gpu, recognizer=recognizer)
         return self._ocr_engines[language]
 
     @staticmethod

@@ -124,7 +124,10 @@ async def replace_material_pages(material: Material, pages: list[MaterialPage]) 
         )
         for page in pages
     ]
-    await MaterialPageDocument.insert_many(documents)
+    # Insert in batches of 10 pages to avoid MongoDB 16MB BSON limit on bulk command size.
+    batch_size = 10
+    for i in range(0, len(documents), batch_size):
+        await MaterialPageDocument.insert_many(documents[i : i + batch_size])
 
 
 async def get_material_pages(material: Material) -> list[MaterialPage]:

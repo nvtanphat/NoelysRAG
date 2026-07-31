@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import threading
 
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
@@ -13,6 +14,40 @@ from src.processing.types import DependencyUnavailableError
 from src.rag.types import RetrievedChunk
 
 logger = logging.getLogger(__name__)
+
+# Process-wide cache for the cross-encoder model. Without this, every
+# CrossEncoderReranker instance (query_service, summary_service, study_guide,
+# inference_engine, the startup warmup, and SLEC sentence-coverage) loads its OWN
+# ~2GB cross-encoder — the warmup's copy is even discarded, so the first real
+# query reloads it cold and re-inits it again, costing minutes. Keyed by
+# (model, device, max_length) so all instances share ONE GPU-resident model.
+_CROSS_ENCODER_CACHE: dict[tuple[str, str, int], object] = {}
+_CROSS_ENCODER_CACHE_LOCK = threading.Lock()
+
+
+def get_cached_cross_encoder(model_name: str, device: str, max_length: int):
+    key = (model_name, device, max_length)
+    cached = _CROSS_ENCODER_CACHE.get(key)
+    if cached is not None:
+        return cached
+    with _CROSS_ENCODER_CACHE_LOCK:
+        cached = _CROSS_ENCODER_CACHE.get(key)
+        if cached is None:
+            try:
+                from sentence_transformers import CrossEncoder
+            except Exception as exc:
+                raise DependencyUnavailableError(
+                    f"sentence-transformers could not be imported: {exc}"
+                ) from exc
+            logger.info(
+                "Loading CrossEncoder reranker (cached)",
+                extra={"model": model_name, "device": device, "max_length": max_length},
+            )
+            # max_length truncates each (query, chunk) pair so a long chunk (e.g. a
+            # 10k-char table) does not blow a predict batch up to minutes.
+            cached = CrossEncoder(model_name, device=device, max_length=max_length)
+            _CROSS_ENCODER_CACHE[key] = cached
+        return cached
 
 
 class CrossEncoderReranker:
@@ -28,13 +63,11 @@ class CrossEncoderReranker:
 
     def _load_model(self):
         if self._model is None:
-            try:
-                from sentence_transformers import CrossEncoder
-            except Exception as exc:
-                raise DependencyUnavailableError(
-                    f"sentence-transformers could not be imported: {exc}"
-                ) from exc
-            self._model = CrossEncoder(self.settings.reranker_model_name, device=self.settings.reranker_device)
+            self._model = get_cached_cross_encoder(
+                self.settings.reranker_model_name,
+                self.settings.reranker_device,
+                getattr(self.settings, "reranker_max_length", 512),
+            )
         return self._model
 
     async def _aload_model(self):
