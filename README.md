@@ -420,20 +420,6 @@ A ladder ablation study reveals the impact of each modular component:
 
 ---
 
-## 📜 License & Academic Citation
+## 📜 License
 
 The source code is released under the [MIT License](LICENSE).
-
-For further scientific details and architecture discussions, please refer to the thesis report [BaoCaoDoAn.pdf](BaoCaoDoAn.pdf) or the research paper [paper.pdf](paper.pdf).
-
-If you find this research helpful in your work, please cite it using the following BibTeX format:
-
-```bibtex
-@article{phat2026agentbook,
-  title={AgentBook: Hệ thống RAG đa phương thức bảo toàn và kiểm chứng dẫn chứng cho hỏi đáp tài liệu},
-  author={Nguyễn Văn Tấn Phát},
-  journal={Department of Information Technology, Thuyloi University HCMC Campus},
-  year={2026},
-  address={Ho Chi Minh City, Vietnam}
-}
-```
